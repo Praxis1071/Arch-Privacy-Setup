@@ -1,4 +1,4 @@
-# CachyOS / Arch Linux Privacy Auto-Setup
+# Arch Linux / CachyOS Privacy Auto-Setup
 
 Bu proje, Arch tabanlı sistemlerde (CachyOS vb.) sistem açılışında otomatik MAC adresi değiştirmeyi ve Cloudflare WARP tünellemesini otomatize eder.
 
