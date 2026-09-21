@@ -1,53 +1,71 @@
 # Arch Linux / CachyOS Privacy Auto-Setup
 
-Bu proje, Arch tabanlı sistemlerde (CachyOS vb.) sistem açılışında otomatik MAC adresi değiştirmeyi ve Cloudflare WARP tünellemesini otomatize eder.
+An automated privacy-oriented setup script for Arch-based Linux systems such as CachyOS.
 
-## Özellikler
+The project automates boot-time MAC address randomization and Cloudflare WARP setup while keeping the configuration focused on NetworkManager and systemd.
 
-- **Dinamik Ağ Algılama:** Sistemdeki aktif, fiziksel ağ kartını (`wlan0`, `eth0`, `wlp3s0` vb.) otomatik tespit eder; `docker0`, `veth*`, `br-*`, `virbr*`, `tun*`, `wg*` gibi sanal arayüzleri hariç tutar.
-- **MAC Spoofing:** Algılanan ağ arayüzü için her boot esnasında rastgele MAC adresi atar.
-- **NetworkManager Uyumluluğu:** NM'nin kendi MAC randomizasyon/yönetim mekanizmasını `preserve` moduna alarak macchanger servisiyle çakışmasını engeller.
-- **Cloudflare WARP:** Sistem açıldığında otomatik bağlanan tünel servisi kurar.
-- **NetworkManager Fix:** Captive Portal denetimini devre dışı bırakarak Wi-Fi üzerindeki soru işareti simgesini düzeltir.
-- **Hataya Dayanıklı Kurulum:** `warp-cli` zaten kayıtlı/bağlıysa script durmaz; her adım kendi hata kontrolünü yapar.
+## Features
 
-## Kullanım
+- **Automatic network interface detection** — detects the active physical interface and ignores common virtual interfaces such as Docker, bridges, WireGuard, TUN and VM interfaces.
+- **MAC address randomization** — assigns a randomized MAC address during boot.
+- **NetworkManager integration** — configures NetworkManager so its MAC handling does not conflict with the macchanger service.
+- **Cloudflare WARP** — installs and enables a service that reconnects WARP during system startup.
+- **Connectivity-check configuration** — disables NetworkManager captive-portal connectivity checks.
+- **Idempotent setup** — can be run again to update the configuration safely.
+- **Error-aware installation** — handles already registered or connected WARP states without treating them as fatal errors.
 
-> ⚠️ **Script'i `sudo ./setup.sh` ile ÇALIŞTIRMAYIN.** Script normal kullanıcı olarak başlatılmalıdır; ihtiyaç duyduğu her adımda kendisi `sudo` isteyecektir. Root olarak çalıştırılırsa, `yay` kurulumu sırasında kullanılan `makepkg` komutu Arch güvenlik politikaları gereği root olarak çalışmayı reddeder ve script hata ile durur. Script bu durumu artık kendisi de tespit edip net bir uyarıyla çıkış yapar.
+## Usage
 
-### Yöntem 1 — Dosyayı çalıştırarak
+> **Do not run `setup.sh` with `sudo ./setup.sh`.**
+>
+> Run it as a normal user. The script requests `sudo` only for operations that require elevated privileges. Running the whole script as root can break AUR builds because `makepkg` intentionally refuses to run as root.
+
+### Method 1 — Run the local script
 
 ```bash
 chmod +x setup.sh
 ./setup.sh
 ```
 
-### Yöntem 2 — Tek satır (fish shell)
+### Method 2 — Download and run
 
-Aşağıdaki tek komut, scripti indirip/oluşturup doğrudan çalıştırır:
-
-```fish
-curl -fsSL https://raw.githubusercontent.com/Praxis1071/CachyOS-Privacy-Setup/main/setup.sh | bash
+```bash
+curl -fsSL https://raw.githubusercontent.com/Praxis1071/Arch-Privacy-Setup/main/setup.sh | bash
 ```
 
-## Uyarılar
+Review any remote script before executing it on a system you care about.
 
-- Script `sudo` gerektiren birçok sistem dosyasını değiştirir (systemd unit'leri, NetworkManager konfigürasyonu). Çalıştırmadan önce içeriğini gözden geçirmeniz önerilir.
-- `cloudflare-warp-bin` AUR paketidir; `yay`/`paru` ile `--noconfirm` bayrağı kullanılarak kurulur. AUR paketlerini güvenmeden önce PKGBUILD'ini incelemeniz tavsiye edilir.
-- **Sistemde `yay` veya `paru` yoksa:** Script sizden onay ister ve onaylarsanız `yay-bin` AUR deposunu klonlayıp (`base-devel`, `git` bağımlılıklarını kurarak) kaynaktan derler. Bu yöntem depo adı veya paket yöneticisi farkı gözetmeksizin tüm Arch tabanlı dağıtımlarda (CachyOS, Manjaro, EndeavourOS vb.) çalışır. Onay vermezseniz script AUR yardımcı programını elle kurmanızı isteyip durur.
-- `connectivity.enabled=false` ayarı, captive portal (havaalanı/otel Wi-Fi giriş sayfaları) algılamasını da etkileyebilir.
-- Sanal makine, konteyner veya çoklu ağ kartı olan sistemlerde otomatik arayüz tespiti yanlış kart seçebilir; gerekirse `INTERFACE` değişkenini elle ayarlayın.
-- **Ağ arayüzü değişirse scripti tekrar çalıştırın:** `macchanger.service`, kurulum anında tespit edilen arayüze (ör. `wlan0`) sabitlenir. Daha sonra Wi-Fi'dan Ethernet'e (veya tam tersi) geçerseniz ya da farklı bir ağ kartı kullanmaya başlarsanız, servis hâlâ eski/kullanılmayan arayüzü hedefleyecektir. Bu durumda MAC değişimi yeni arayüz için etkin olmaz; scripti yeni arayüzle tekrar çalıştırarak servisi güncelleyin.
-- Script tekrar çalıştırılabilir (idempotent); mevcut servis/konfigürasyon dosyalarının üzerine güvenle yazar.
-- **WARP bağlantı doğrulaması manueldir:** MAC değişimi ve WARP bağlantısı sırasında ağ birkaç saniyeliğine kesintiye uğrayabildiğinden, script içinde otomatik bir `curl` testi YOKTUR (yanlış-negatif hata vermesin diye). Kurulum bittikten birkaç saniye sonra bağlantıyı kendiniz doğrulayın:
+## Requirements
 
-  ```bash
-  warp-cli --accept-tos status && curl -s https://www.cloudflare.com/cdn-cgi/trace
-  ```
+- Arch Linux or another Arch-based distribution
+- NetworkManager
+- systemd
+- `sudo`
+- An AUR helper such as `yay` or `paru`, or permission for the script to install `yay-bin`
+- Cloudflare WARP
 
-  Çıktıda `warp=on` satırını görmelisiniz.
+The script can install the required AUR helper when one is not already available, after asking for confirmation.
 
-## Kaldırma
+## Important notes
+
+- The setup changes systemd units and NetworkManager configuration.
+- AUR packages should be reviewed before installation.
+- Captive-portal detection is disabled by the generated NetworkManager configuration.
+- On systems with multiple physical network interfaces, verify the selected interface.
+- If you switch between Wi-Fi and Ethernet, run the setup again so the generated macchanger service targets the current interface.
+- MAC changes and WARP startup can temporarily interrupt network connectivity.
+- The script intentionally does **not** perform an automatic `curl` connectivity test during installation.
+
+After setup, verify WARP manually:
+
+```bash
+warp-cli --accept-tos status
+curl -s https://www.cloudflare.com/cdn-cgi/trace
+```
+
+The trace output should report `warp=on` when WARP is active.
+
+## Removal
 
 ```bash
 sudo systemctl disable --now macchanger.service warp-autoconnect.service
@@ -57,3 +75,7 @@ sudo systemctl daemon-reload
 sudo systemctl restart NetworkManager
 warp-cli disconnect
 ```
+
+## License
+
+GNU General Public License v3 or later (GPL-3.0-or-later). See [LICENSE](LICENSE).
