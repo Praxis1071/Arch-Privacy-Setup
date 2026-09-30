@@ -3,7 +3,6 @@
 # CachyOS / Arch Linux Privacy Auto-Setup
 # - Boot'ta rastgele MAC adresi (macchanger)
 # - Cloudflare WARP otomatik bağlantı
-# - NetworkManager "sınırlı bağlantı" (?) simgesi düzeltmesi
 #
 set -uo pipefail
 # NOT: set -e kasıtlı olarak KULLANILMIYOR. warp-cli gibi araçlar zaten
@@ -176,7 +175,9 @@ for i in $(seq 1 15); do
     sleep 1
 done
 
-warp-cli --accept-tos registration new &> /dev/null || true
+if ! warp-cli --accept-tos registration show &> /dev/null; then
+    warp-cli --accept-tos registration new &> /dev/null || true
+fi
 warp-cli --accept-tos mode warp &> /dev/null || true
 
 # ---------------------------------------------------------------------------
@@ -198,6 +199,11 @@ log() { echo "[warp] $*"; }
 warn() { echo "[warp] [!] $*" >&2; }
 
 command -v warp-cli >/dev/null 2>&1 || exit 0
+
+exec 9>/run/arch-privacy-warp.lock
+if ! flock -n 9; then
+    exit 0
+fi
 
 for _ in $(seq 1 30); do
     if ip route show default | grep -q '^default '; then
@@ -233,23 +239,28 @@ if [ "$CONNECTED" -ne 1 ]; then
     exit 0
 fi
 
-TRACE="$(curl --silent --show-error --max-time 10 \
-    https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+trace_ok() {
+    local trace
+    trace="$(curl --silent --show-error --max-time 8 \
+        https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+    grep -q '^warp=on$' <<<"$trace"
+}
 
-if grep -q '^warp=on$' <<<"$TRACE"; then
-    log "WARP end-to-end bağlantısı doğrulandı."
-    exit 0
-fi
+for _ in $(seq 1 3); do
+    if trace_ok; then
+        log "WARP end-to-end bağlantısı doğrulandı."
+        exit 0
+    fi
+    sleep 2
+done
 
-warn "WARP Connected görünüyor fakat HTTPS trace doğrulanamadı; yeniden bağlanılıyor."
+warn "WARP Connected görünüyor fakat veri yolu doğrulanamadı; bir kez yeniden bağlanılıyor."
 warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
 sleep 2
 warp-cli --accept-tos connect >/dev/null 2>&1 || true
 
 for _ in $(seq 1 15); do
-    TRACE="$(curl --silent --show-error --max-time 5 \
-        https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
-    if grep -q '^warp=on$' <<<"$TRACE"; then
+    if trace_ok; then
         log "WARP yeniden bağlandı ve trafik doğrulandı."
         exit 0
     fi
@@ -321,11 +332,8 @@ sudo chmod 0755 /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp
 # ---------------------------------------------------------------------------
 # 7) NetworkManager "sınırlı bağlantı" (?) ikonu düzeltmesi
 # ---------------------------------------------------------------------------
-log "NetworkManager captive-portal kontrolü kapatılıyor..."
-sudo mkdir -p /etc/NetworkManager/conf.d/
-printf '[connectivity]
-enabled=false
-' | sudo tee /etc/NetworkManager/conf.d/20-connectivity.conf > /dev/null
+# Captive-portal connectivity check'i WARP dayanıklılığı için gerekli değildir.
+# NetworkManager'ın normal bağlantı durumunu değiştirmeden bırakılır.
 
 # WARP'ı önce ayır: NetworkManager restart sırasında yarım tunnel bırakma.
 warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
