@@ -1,0 +1,13 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  static:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate setup script and project metadata
+        run: bash tests/test_setup.sh
