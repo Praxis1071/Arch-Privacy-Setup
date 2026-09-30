@@ -10,7 +10,7 @@ The project automates boot-time MAC address randomization and Cloudflare WARP se
 - **MAC address randomization** — assigns a randomized MAC address during boot.
 - **NetworkManager integration** — configures NetworkManager so its MAC handling does not conflict with the macchanger service.
 - **Cloudflare WARP** — installs and enables a service that reconnects WARP during system startup.
-- **WARP network resilience** — re-synchronizes WARP after NetworkManager connection changes, including Wi-Fi/hotspot reconnects and DHCP changes.
+- **WARP network resilience** — re-synchronizes WARP after NetworkManager connection changes, including Wi-Fi/hotspot reconnects and DHCP changes, through a dedicated recovery service.
 - **End-to-end WARP verification** — does not treat warp-cli status alone as proof of working Internet traffic; it verifies the Cloudflare trace endpoint and expects warp=on.
 - **Safe WARP recovery** — if WARP reports connected but its data path is broken, the setup retries the tunnel and disconnects the broken tunnel rather than leaving the host without normal Internet access.
 - **Connectivity-check configuration** — disables NetworkManager captive-portal connectivity checks.
@@ -98,9 +98,10 @@ The trace output should report warp=on when WARP is active.
 If you want to remove only the components created by this setup:
 
 ~~~bash
-sudo systemctl disable --now macchanger.service warp-autoconnect.service
+sudo systemctl disable --now macchanger.service warp-autoconnect.service warp-network-recover.service
 sudo rm -f /etc/systemd/system/macchanger.service
 sudo rm -f /etc/systemd/system/warp-autoconnect.service
+sudo rm -f /etc/systemd/system/warp-network-recover.service
 sudo rm -f /usr/local/libexec/arch-privacy-warp-connect
 sudo rm -f /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp
 sudo rm -f /etc/NetworkManager/conf.d/10-mac-preserve.conf
