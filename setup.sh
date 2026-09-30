@@ -176,7 +176,9 @@ for i in $(seq 1 15); do
     sleep 1
 done
 
-warp-cli --accept-tos registration new &> /dev/null || true
+if ! warp-cli --accept-tos registration show &> /dev/null; then
+    warp-cli --accept-tos registration new &> /dev/null || true
+fi
 warp-cli --accept-tos mode warp &> /dev/null || true
 
 # ---------------------------------------------------------------------------
@@ -198,6 +200,11 @@ log() { echo "[warp] $*"; }
 warn() { echo "[warp] [!] $*" >&2; }
 
 command -v warp-cli >/dev/null 2>&1 || exit 0
+
+exec 9>/run/arch-privacy-warp.lock
+if ! flock -n 9; then
+    exit 0
+fi
 
 for _ in $(seq 1 30); do
     if ip route show default | grep -q '^default '; then
@@ -321,11 +328,8 @@ sudo chmod 0755 /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp
 # ---------------------------------------------------------------------------
 # 7) NetworkManager "sınırlı bağlantı" (?) ikonu düzeltmesi
 # ---------------------------------------------------------------------------
-log "NetworkManager captive-portal kontrolü kapatılıyor..."
-sudo mkdir -p /etc/NetworkManager/conf.d/
-printf '[connectivity]
-enabled=false
-' | sudo tee /etc/NetworkManager/conf.d/20-connectivity.conf > /dev/null
+# Captive-portal connectivity check'i WARP dayanıklılığı için gerekli değildir.
+# NetworkManager'ın normal bağlantı durumunu değiştirmeden bırakılır.
 
 # WARP'ı önce ayır: NetworkManager restart sırasında yarım tunnel bırakma.
 warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
