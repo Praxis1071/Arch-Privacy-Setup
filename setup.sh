@@ -280,6 +280,18 @@ RemainAfterExit=yes
 WantedBy=multi-user.target
 EOF
 
+sudo tee /etc/systemd/system/warp-network-recover.service > /dev/null <<'EOF'
+[Unit]
+Description=Recover Cloudflare WARP after NetworkManager changes
+After=warp-svc.service network-online.target
+Wants=warp-svc.service network-online.target
+Requires=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/arch-privacy-warp-connect
+EOF
+
 sudo tee /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp > /dev/null <<'EOF'
 #!/usr/bin/env bash
 set -u
@@ -301,7 +313,7 @@ case "$IFACE" in
         ;;
 esac
 
-systemctl start --no-block warp-autoconnect.service >/dev/null 2>&1 || true
+systemctl start --no-block warp-network-recover.service >/dev/null 2>&1 || true
 EOF
 
 sudo chmod 0755 /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp
@@ -323,6 +335,7 @@ sudo systemctl restart NetworkManager
 
 sudo systemctl daemon-reload
 sudo systemctl enable warp-autoconnect.service
+sudo systemctl daemon-reload
 sudo systemctl start warp-autoconnect.service
 
 # ---------------------------------------------------------------------------
