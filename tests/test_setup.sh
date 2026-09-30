@@ -28,4 +28,24 @@ fi
 
 grep -q '^MIT License$' "$LICENSE"
 
+# Validate shell scripts embedded in setup.sh.
+tmpdir="$(mktemp -d)"
+trap 'rm -rf "$tmpdir"' EXIT
+
+awk '
+  /sudo tee \/usr\/local\/libexec\/arch-privacy-warp-connect > \/dev\/null <<'"'"'EOF'"'"'/ {capture=1; next}
+  capture && /^EOF$/ {exit}
+  capture {print}
+' "$SETUP" > "$tmpdir/arch-privacy-warp-connect"
+
+bash -n "$tmpdir/arch-privacy-warp-connect"
+
+awk '
+  /sudo tee \/etc\/NetworkManager\/dispatcher.d\/90-arch-privacy-warp > \/dev\/null <<'"'"'EOF'"'"'/ {capture=1; next}
+  capture && /^EOF$/ {exit}
+  capture {print}
+' "$SETUP" > "$tmpdir/90-arch-privacy-warp"
+
+bash -n "$tmpdir/90-arch-privacy-warp"
+
 echo "Arch Privacy Setup static checks passed."
