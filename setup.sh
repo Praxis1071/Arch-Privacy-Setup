@@ -243,7 +243,29 @@ trace_ok() {
     local trace
     trace="$(curl --silent --show-error --max-time 8 \
         https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
-    grep -q '^warp=on
+    grep -q '^warp=on$' <<<"$trace"
+}
+
+for _ in $(seq 1 3); do
+    if trace_ok; then
+        log "WARP end-to-end bağlantısı doğrulandı."
+        exit 0
+    fi
+    sleep 2
+done
+
+warn "WARP Connected görünüyor fakat veri yolu doğrulanamadı; bir kez yeniden bağlanılıyor."
+warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
+sleep 2
+warp-cli --accept-tos connect >/dev/null 2>&1 || true
+
+for _ in $(seq 1 15); do
+    if trace_ok; then
+        log "WARP yeniden bağlandı ve trafik doğrulandı."
+        exit 0
+    fi
+    sleep 1
+done
 
 warn "WARP doğrulanamadı. WARP ayrılıyor; normal internet korunuyor."
 warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
