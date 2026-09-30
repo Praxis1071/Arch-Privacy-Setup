@@ -3,7 +3,6 @@
 # CachyOS / Arch Linux Privacy Auto-Setup
 # - Boot'ta rastgele MAC adresi (macchanger)
 # - Cloudflare WARP otomatik bağlantı
-# - NetworkManager "sınırlı bağlantı" (?) simgesi düzeltmesi
 #
 set -uo pipefail
 # NOT: set -e kasıtlı olarak KULLANILMIYOR. warp-cli gibi araçlar zaten
@@ -240,23 +239,147 @@ if [ "$CONNECTED" -ne 1 ]; then
     exit 0
 fi
 
-TRACE="$(curl --silent --show-error --max-time 10 \
-    https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+trace_ok() {
+    local trace
+    trace="$(curl --silent --show-error --max-time 8 \
+        https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
+    grep -q '^warp=on
 
-if grep -q '^warp=on$' <<<"$TRACE"; then
-    log "WARP end-to-end bağlantısı doğrulandı."
-    exit 0
+warn "WARP doğrulanamadı. WARP ayrılıyor; normal internet korunuyor."
+warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
+exit 0
+EOF
+
+sudo chmod 0755 /usr/local/libexec/arch-privacy-warp-connect
+
+log "WARP otomatik bağlanma servisi oluşturuluyor..."
+sudo tee /etc/systemd/system/warp-autoconnect.service > /dev/null <<'EOF'
+[Unit]
+Description=Auto Connect Cloudflare WARP (network-safe)
+After=warp-svc.service NetworkManager-wait-online.service network-online.target
+Wants=warp-svc.service network-online.target
+Requires=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/arch-privacy-warp-connect
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+sudo tee /etc/systemd/system/warp-network-recover.service > /dev/null <<'EOF'
+[Unit]
+Description=Recover Cloudflare WARP after NetworkManager changes
+After=warp-svc.service network-online.target
+Wants=warp-svc.service network-online.target
+Requires=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/libexec/arch-privacy-warp-connect
+EOF
+
+sudo tee /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp > /dev/null <<'EOF'
+#!/usr/bin/env bash
+set -u
+
+IFACE="${1:-}"
+ACTION="${2:-}"
+
+case "$ACTION" in
+    up|reapply|dhcp4-change)
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+case "$IFACE" in
+    ""|lo|docker*|veth*|br-*|virbr*|tun*|tap*|wg*|vboxnet*|zt*)
+        exit 0
+        ;;
+esac
+
+systemctl start --no-block warp-network-recover.service >/dev/null 2>&1 || true
+EOF
+
+sudo chmod 0755 /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp
+
+# ---------------------------------------------------------------------------
+# 7) NetworkManager "sınırlı bağlantı" (?) ikonu düzeltmesi
+# ---------------------------------------------------------------------------
+# Captive-portal connectivity check'i WARP dayanıklılığı için gerekli değildir.
+# NetworkManager'ın normal bağlantı durumunu değiştirmeden bırakılır.
+
+# WARP'ı önce ayır: NetworkManager restart sırasında yarım tunnel bırakma.
+warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
+
+sudo systemctl daemon-reload
+sudo systemctl restart NetworkManager
+
+sudo systemctl daemon-reload
+sudo systemctl enable warp-autoconnect.service
+sudo systemctl daemon-reload
+sudo systemctl start warp-autoconnect.service
+
+# ---------------------------------------------------------------------------
+# 8) Durum kontrolü
+# ---------------------------------------------------------------------------
+echo
+echo "======================================================================"
+echo "[✓] Kurulum tamamlandı!"
+echo
+echo "Servis durumları:"
+systemctl is-active macchanger.service        2>/dev/null | xargs -I{} echo "  - macchanger.service       : {}"
+systemctl is-active warp-svc.service          2>/dev/null | xargs -I{} echo "  - warp-svc.service         : {}"
+systemctl is-enabled warp-autoconnect.service 2>/dev/null | xargs -I{} echo "  - warp-autoconnect.service : {}"
+echo
+echo "MAC adresi:"
+macchanger -s "$INTERFACE" 2>/dev/null || warn "macchanger -s $INTERFACE çalıştırılamadı."
+echo
+echo "WARP durumu:"
+warp-cli --accept-tos status 2>/dev/null || true
+echo
+echo "End-to-end kontrol:"
+if curl --silent --show-error --max-time 10 https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null | grep -q '^warp=on$'; then
+    echo "  - Cloudflare WARP       : doğrulandı (warp=on)"
+else
+    echo "  - Cloudflare WARP       : aktif değil veya doğrulanamadı"
+    echo "    Normal internetin bozulmaması için WARP yarım bağlantıda bırakılmaz."
 fi
+echo
+echo "[i] NetworkManager ağ değişikliklerinde WARP otomatik olarak yeniden"
+echo "    senkronize edilir. Bu özellikle Wi-Fi <-> Ethernet ve hotspot"
+echo "    değişimlerinde eski tunnel/firewall durumunun kalmasını önler."
+echo
+echo "[i] WARP doğrulaması için Cloudflare'ın önerdiği trace yöntemi kullanılır:"
+echo "    curl -s https://www.cloudflare.com/cdn-cgi/trace"
+echo "    Çıktıda 'warp=on' görünmelidir."
+echo
+echo "[!] HATIRLATMA: macchanger.service şu an sadece '$INTERFACE' arayüzü"
+echo "    için ayarlandı. Wi-Fi <-> Ethernet arasında MAC randomizasyonunu"
+echo "    yeni arayüze taşımak için scripti yeniden çalıştırın."
+echo "======================================================================"
+ <<<"$trace"
+}
 
-warn "WARP Connected görünüyor fakat HTTPS trace doğrulanamadı; yeniden bağlanılıyor."
+for _ in $(seq 1 3); do
+    if trace_ok; then
+        log "WARP end-to-end bağlantısı doğrulandı."
+        exit 0
+    fi
+    sleep 2
+done
+
+warn "WARP Connected görünüyor fakat veri yolu doğrulanamadı; bir kez yeniden bağlanılıyor."
 warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
 sleep 2
 warp-cli --accept-tos connect >/dev/null 2>&1 || true
 
 for _ in $(seq 1 15); do
-    TRACE="$(curl --silent --show-error --max-time 5 \
-        https://www.cloudflare.com/cdn-cgi/trace 2>/dev/null || true)"
-    if grep -q '^warp=on$' <<<"$TRACE"; then
+    if trace_ok; then
         log "WARP yeniden bağlandı ve trafik doğrulandı."
         exit 0
     fi
