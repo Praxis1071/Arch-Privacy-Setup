@@ -22,13 +22,46 @@ PRIVACY_PROPERTIES=(
 
 configure_scan_privacy() {
     local file="/etc/NetworkManager/conf.d/90-arch-privacy-setup.conf"
+    local tmp
+    tmp="$(mktemp)"
+
     sudo install -d -m 0755 /etc/NetworkManager/conf.d
-    sudo tee "$file" >/dev/null <<'CONF'
+    cat > "$tmp" <<'CONF'
 # Managed by Arch Privacy Setup.
+#
+# The systemd-resolved backend is selected explicitly because NetworkManager's
+# per-connection DNS-over-TLS/DNSSEC settings require a compatible DNS plugin.
+[main]
+dns=systemd-resolved
+
+# Apply privacy-preserving defaults to newly created profiles when the profile
+# itself leaves the property at its global default. Explicit profile policies
+# remain authoritative.
+[connection]
+llmnr=no
+mdns=no
+dns-over-tls=yes
+dnssec=yes
+ipv4.dhcp-client-id=stable
+ipv4.dhcp-iaid=stable
+ipv4.dhcp-send-hostname=no
+ipv6.addr-gen-mode=stable-privacy
+ipv6.ip6-privacy=2
+ipv6.dhcp-duid=stable-uuid
+ipv6.dhcp-iaid=stable
+ipv6.dhcp-send-hostname=no
+wifi.cloned-mac-address=random
+ethernet.cloned-mac-address=random
+
 [device]
 wifi.scan-rand-mac-address=yes
 CONF
-    sudo chmod 0644 "$file"
+
+    if ! sudo install -m 0644 "$tmp" "$file"; then
+        rm -f "$tmp"
+        die "Could not install NetworkManager privacy configuration."
+    fi
+    rm -f "$tmp"
 }
 
 configure_connection_privacy() {
