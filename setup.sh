@@ -136,6 +136,12 @@ fi
 # ---------------------------------------------------------------------------
 # 4) MAC Changer systemd servisi
 # ---------------------------------------------------------------------------
+# Bu değer, macchanger uygulanmadan önceki gerçek kernel MAC'idir. Böylece
+# ethtool gibi ek paketlere ihtiyaç duymadan macchanger'ın gerçekten bir
+# değişiklik yapıp yapmadığını doğrulayabiliriz.
+ORIGINAL_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
+[ -n "$ORIGINAL_MAC" ] || die "$INTERFACE için mevcut MAC adresi okunamadı."
+
 log "MAC Changer servisi oluşturuluyor ($INTERFACE için)..."
 
 # systemd device unit adları özel karakterler için escape gerektirir
@@ -169,14 +175,13 @@ sudo systemctl start macchanger.service || die "macchanger.service başlatılama
 # Servisin "active (exited)" olması tek başına yeterli değildir; cihazın
 # kernel'deki mevcut adresini ayrıca doğruluyoruz.
 RANDOMIZED_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
-PERMANENT_MAC="$(ethtool -P "$INTERFACE" 2>/dev/null | awk '{print $3}' | tr '[:upper:]' '[:lower:]' || true)"
 
 if [ -z "$RANDOMIZED_MAC" ]; then
     die "MAC adresi okunamadı: $INTERFACE"
 fi
 
-if [ -n "$PERMANENT_MAC" ] && [ "$RANDOMIZED_MAC" = "$PERMANENT_MAC" ]; then
-    die "macchanger çalıştı ancak $INTERFACE hâlâ kalıcı MAC adresini kullanıyor ($RANDOMIZED_MAC). journalctl -u macchanger.service ile hatayı inceleyin."
+if [ "$RANDOMIZED_MAC" = "$ORIGINAL_MAC" ]; then
+    die "macchanger çalıştı ancak $INTERFACE MAC adresini değiştirmedi ($RANDOMIZED_MAC). journalctl -u macchanger.service ile hatayı inceleyin."
 fi
 
 log "MAC adresi doğrulandı: $RANDOMIZED_MAC"
@@ -360,14 +365,15 @@ sudo systemctl restart NetworkManager
 sleep 2
 
 CURRENT_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
-if [ -n "$PERMANENT_MAC" ] && [ "$CURRENT_MAC" = "$PERMANENT_MAC" ]; then
-    warn "NetworkManager yeniden başlatıldıktan sonra MAC kalıcı adrese geri döndü."
+if [ "$CURRENT_MAC" != "$RANDOMIZED_MAC" ]; then
+    warn "NetworkManager yeniden başlatıldıktan sonra MAC değişti ($CURRENT_MAC)."
     warn "macchanger tekrar uygulanıyor ve ardından MAC yeniden doğrulanıyor."
     sudo systemctl restart macchanger.service || die "macchanger.service yeniden başlatılamadı."
     CURRENT_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
-    if [ "$CURRENT_MAC" = "$PERMANENT_MAC" ]; then
-        die "MAC randomizasyonu doğrulanamadı. journalctl -u macchanger.service ve NetworkManager günlüklerini kontrol edin."
+    if [ "$CURRENT_MAC" = "$ORIGINAL_MAC" ]; then
+        die "MAC randomizasyonu doğrulanamadı; NetworkManager MAC'i geri alıyor olabilir. journalctl -u macchanger.service ve NetworkManager günlüklerini kontrol edin."
     fi
+    RANDOMIZED_MAC="$CURRENT_MAC"
 fi
 
 log "NetworkManager sonrasında MAC doğrulandı: $CURRENT_MAC"
