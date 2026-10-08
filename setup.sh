@@ -53,10 +53,6 @@ if echo "$INTERFACE" | grep -Eq "$VIRTUAL_IFACE_REGEX"; then
 fi
 
 log "Kullanılacak ağ arayüzü: $INTERFACE"
-warn "ÖNEMLİ: macchanger servisi bu arayüze (\"$INTERFACE\") SABİTLENECEK."
-warn "Daha sonra farklı bir ağ arayüzüne geçerseniz (ör. Wi-Fi'dan Ethernet'e,"
-warn "ya da arayüz adı değişirse) bu script tekrar çalıştırılmalıdır, aksi"
-warn "halde MAC değişimi artık kullanılmayan eski arayüz için yapılmaya devam eder."
 
 # ---------------------------------------------------------------------------
 # 2) Paketler
@@ -150,8 +146,6 @@ EOF
 sudo nmcli general reload conf || die "NetworkManager yapılandırması yeniden yüklenemedi."
 
 # 4) Cloudflare WARP
-# ---------------------------------------------------------------------------
-# 5) Cloudflare WARP
 # ---------------------------------------------------------------------------
 log "Cloudflare WARP servisi başlatılıyor..."
 sudo systemctl enable --now warp-svc.service || die "warp-svc.service başlatılamadı."
