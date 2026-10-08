@@ -269,7 +269,8 @@ Requires=NetworkManager.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/libexec/arch-privacy-warp-connect
-RemainAfterExit=yes
+TimeoutStartSec=90
+TimeoutStopSec=10
 
 [Install]
 WantedBy=multi-user.target
@@ -360,7 +361,15 @@ log "NetworkManager native MAC politikası etkin. Mevcut MAC: $CURRENT_MAC"
 sudo systemctl daemon-reload
 sudo systemctl enable warp-autoconnect.service
 sudo systemctl daemon-reload
-sudo systemctl start warp-autoconnect.service
+
+# WARP recovery helper intentionally runs asynchronously. It may need to wait
+# for a default route, WARP connection establishment, and end-to-end HTTPS
+# verification. Blocking setup.sh here made a healthy setup look frozen.
+if sudo systemctl start --no-block warp-autoconnect.service; then
+    log "WARP otomatik bağlantı yardımcısı arka planda başlatıldı."
+else
+    warn "WARP otomatik bağlantı yardımcısı başlatılamadı; dispatcher daha sonra tekrar deneyecek."
+fi
 
 # ---------------------------------------------------------------------------
 # 9) Durum kontrolü
