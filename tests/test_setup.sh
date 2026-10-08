@@ -15,7 +15,7 @@ grep -q 'warp-network-recover.service' "$SETUP"
 grep -q '90-arch-privacy-warp' "$SETUP"
 grep -q 'No packages were uninstalled' "$SETUP"
 
-if grep -q 'warp-cli.*connect' "$SETUP"; then
+if grep -Eq 'warp-cli.*[[:space:]]connect([[:space:]]|$)' "$SETUP"; then
     echo "Phase 0 cleanup must not connect WARP" >&2
     exit 1
 fi
