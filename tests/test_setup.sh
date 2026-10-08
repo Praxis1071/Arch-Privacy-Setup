@@ -18,6 +18,9 @@ grep -q "connection.mdns no" "$ROOT/lib/privacy.sh"
 grep -q "9.9.9.9#dns.quad9.net" "$ROOT/lib/privacy.sh"
 grep -q "2620:fe::fe#dns.quad9.net" "$ROOT/lib/privacy.sh"
 grep -q "No Arch Privacy Setup rollback state" "$ROOT/rollback.sh"
+grep -q "State was preserved for another rollback attempt" "$ROOT/rollback.sh"
+grep -q "An existing rollback state was found" "$ROOT/setup.sh"
+grep -q "does not prove end-to-end DNS privacy" "$ROOT/audit.sh"
 
 if grep -REq "macchanger|nft flush ruleset|systemctl restart NetworkManager" "$ROOT/setup.sh" "$ROOT/rollback.sh" "$ROOT/audit.sh" "$ROOT/lib/"*.sh; then
     exit 1
