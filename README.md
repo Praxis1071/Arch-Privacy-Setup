@@ -7,8 +7,8 @@ The project automates boot-time MAC address randomization and Cloudflare WARP se
 ## Features
 
 - **Automatic network interface detection** — detects the active physical interface and ignores common virtual interfaces such as Docker, bridges, WireGuard, TUN and VM interfaces.
-- **MAC address randomization** — assigns a randomized MAC address during boot.
-- **NetworkManager integration** — configures NetworkManager so its MAC handling does not conflict with the macchanger service.
+- **MAC address randomization** — assigns a randomized MAC address before NetworkManager starts and verifies that the kernel actually accepted the change.
+- **NetworkManager integration** — configures NetworkManager to preserve the MAC assigned by macchanger instead of replacing it during connection activation.
 - **Cloudflare WARP** — installs and enables a service that reconnects WARP during system startup.
 - **WARP network resilience** — re-synchronizes WARP after NetworkManager connection changes, including Wi-Fi/hotspot reconnects and DHCP changes, through a dedicated recovery service.
 - **End-to-end WARP verification** — does not treat warp-cli status alone as proof of working Internet traffic; it verifies the Cloudflare trace endpoint and expects warp=on.
@@ -23,13 +23,14 @@ The setup deliberately avoids connecting WARP before restarting NetworkManager. 
 The current order is:
 
 1. Configure NetworkManager.
-2. Disconnect any existing WARP tunnel before restarting NetworkManager.
-3. Restart NetworkManager.
-4. Wait for a real default route.
-5. Connect WARP.
-6. Verify the end-to-end path with Cloudflare's trace endpoint, with retries so a transient HTTPS failure is not treated as a tunnel failure.
-7. If recovery is necessary, reconnect WARP once; only disconnect WARP after the recovery attempt also fails.
-8. Re-run the WARP connection when NetworkManager reports a relevant interface change.
+2. Apply and verify the randomized MAC address before NetworkManager starts managing the interface.
+3. Disconnect any existing WARP tunnel before restarting NetworkManager.
+4. Restart NetworkManager and verify that it preserved the randomized MAC.
+5. Wait for a real default route.
+6. Connect WARP.
+7. Verify the end-to-end path with Cloudflare's trace endpoint, with retries so a transient HTTPS failure is not treated as a tunnel failure.
+8. If recovery is necessary, reconnect WARP once; only disconnect WARP after the recovery attempt also fails.
+9. Re-run the WARP connection when NetworkManager reports a relevant interface change.
 
 NetworkManager dispatcher events are used instead of modifying routing tables or flushing nftables globally. The shared WARP helper uses a lock so overlapping dispatcher events cannot run competing disconnect/reconnect operations. This keeps the fix scoped to WARP and avoids destroying unrelated firewall state.
 
@@ -80,6 +81,7 @@ The script can install the required AUR helper when one is not already available
 - On systems with multiple physical network interfaces, verify the selected interface.
 - If you switch between Wi-Fi and Ethernet, run the setup again so the generated macchanger service targets the current interface.
 - MAC changes and WARP startup can temporarily interrupt network connectivity.
+- The generated `macchanger.service` is ordered through `network-pre.target`, so MAC randomization is attempted before NetworkManager activation. The setup also performs an explicit post-restart verification and retries macchanger if NetworkManager changes the address.
 - WARP recovery intentionally prefers restoring ordinary Internet connectivity over leaving a broken WARP tunnel in place.
 - The setup does **not** globally flush nftables rules. Existing firewall rules outside WARP are left intact.
 

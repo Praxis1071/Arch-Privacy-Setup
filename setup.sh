@@ -136,6 +136,12 @@ fi
 # ---------------------------------------------------------------------------
 # 4) MAC Changer systemd servisi
 # ---------------------------------------------------------------------------
+# Bu değer, macchanger uygulanmadan önceki gerçek kernel MAC'idir. Böylece
+# ethtool gibi ek paketlere ihtiyaç duymadan macchanger'ın gerçekten bir
+# değişiklik yapıp yapmadığını doğrulayabiliriz.
+ORIGINAL_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
+[ -n "$ORIGINAL_MAC" ] || die "$INTERFACE için mevcut MAC adresi okunamadı."
+
 log "MAC Changer servisi oluşturuluyor ($INTERFACE için)..."
 
 # systemd device unit adları özel karakterler için escape gerektirir
@@ -157,12 +163,29 @@ ExecStart=/usr/bin/ip link set dev %s up
 RemainAfterExit=yes
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=network-pre.target
 ' "$INTERFACE" "$ESCAPED_IFACE" "$ESCAPED_IFACE" "$INTERFACE" "$INTERFACE" "$INTERFACE" \
     | sudo tee /etc/systemd/system/macchanger.service > /dev/null
 
 sudo systemctl daemon-reload
-sudo systemctl enable --now macchanger.service || warn "macchanger.service başlatılamadı, logları kontrol edin: journalctl -u macchanger.service"
+sudo systemctl enable macchanger.service || die "macchanger.service etkinleştirilemedi."
+sudo systemctl start macchanger.service || die "macchanger.service başlatılamadı. Ayrıntı: journalctl -u macchanger.service"
+
+# macchanger gerçekten farklı bir MAC atadı mı?
+# Servisin "active (exited)" olması tek başına yeterli değildir; cihazın
+# kernel'deki mevcut adresini ayrıca doğruluyoruz.
+RANDOMIZED_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
+
+if [ -z "$RANDOMIZED_MAC" ]; then
+    die "MAC adresi okunamadı: $INTERFACE"
+fi
+
+if [ "$RANDOMIZED_MAC" = "$ORIGINAL_MAC" ]; then
+    die "macchanger çalıştı ancak $INTERFACE MAC adresini değiştirmedi ($RANDOMIZED_MAC). journalctl -u macchanger.service ile hatayı inceleyin."
+fi
+
+log "MAC adresi doğrulandı: $RANDOMIZED_MAC"
+
 
 # ---------------------------------------------------------------------------
 # 5) Cloudflare WARP
@@ -330,16 +353,36 @@ EOF
 sudo chmod 0755 /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp
 
 # ---------------------------------------------------------------------------
-# 7) NetworkManager "sınırlı bağlantı" (?) ikonu düzeltmesi
+# 7) NetworkManager yeniden başlatıldıktan sonra MAC'i tekrar doğrula
 # ---------------------------------------------------------------------------
-# Captive-portal connectivity check'i WARP dayanıklılığı için gerekli değildir.
-# NetworkManager'ın normal bağlantı durumunu değiştirmeden bırakılır.
-
-# WARP'ı önce ayır: NetworkManager restart sırasında yarım tunnel bırakma.
+# NetworkManager'ın "preserve" ayarı MAC'i aktivasyon sırasında değiştirmemesi
+# gerektiğini söyler. Yine de kurulumun gerçek sonucunu kontrol ediyoruz.
 warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
 
 sudo systemctl daemon-reload
 sudo systemctl restart NetworkManager
+
+sleep 2
+
+CURRENT_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
+if [ "$CURRENT_MAC" != "$RANDOMIZED_MAC" ]; then
+    warn "NetworkManager yeniden başlatıldıktan sonra MAC değişti ($CURRENT_MAC)."
+    warn "macchanger tekrar uygulanıyor ve ardından MAC yeniden doğrulanıyor."
+    sudo systemctl restart macchanger.service || die "macchanger.service yeniden başlatılamadı."
+    CURRENT_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
+    if [ "$CURRENT_MAC" = "$ORIGINAL_MAC" ]; then
+        die "MAC randomizasyonu doğrulanamadı; NetworkManager MAC'i geri alıyor olabilir. journalctl -u macchanger.service ve NetworkManager günlüklerini kontrol edin."
+    fi
+    RANDOMIZED_MAC="$CURRENT_MAC"
+fi
+
+log "NetworkManager sonrasında MAC doğrulandı: $CURRENT_MAC"
+
+# ---------------------------------------------------------------------------
+# 8) NetworkManager "sınırlı bağlantı" (?) ikonu düzeltmesi
+# ---------------------------------------------------------------------------
+# Captive-portal connectivity check'i WARP dayanıklılığı için gerekli değildir.
+# NetworkManager'ın normal bağlantı durumunu değiştirmeden bırakılır.
 
 sudo systemctl daemon-reload
 sudo systemctl enable warp-autoconnect.service
@@ -347,7 +390,7 @@ sudo systemctl daemon-reload
 sudo systemctl start warp-autoconnect.service
 
 # ---------------------------------------------------------------------------
-# 8) Durum kontrolü
+# 9) Durum kontrolü
 # ---------------------------------------------------------------------------
 echo
 echo "======================================================================"
