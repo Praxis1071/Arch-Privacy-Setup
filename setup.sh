@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # CachyOS / Arch Linux Privacy Auto-Setup
-# - Boot'ta rastgele MAC adresi (macchanger)
+# - NetworkManager native MAC privacy (stable per Wi-Fi SSID / stable Ethernet)
 # - Cloudflare WARP otomatik bağlantı
 #
 set -uo pipefail
@@ -23,7 +23,7 @@ if [ "${EUID:-$(id -u)}" -eq 0 ]; then
     exit 1
 fi
 
-VIRTUAL_IFACE_REGEX='^(lo|docker|veth|br-|virbr|tun|tap|wg|vboxnet|zt)'
+VIRTUAL_IFACE_REGEX='^(lo|docker|veth|br-|virbr|tun|tap|wg|vboxnet|zt|CloudflareWARP)'
 
 log()  { echo "[+] $*"; }
 warn() { echo "[!] $*" >&2; }
@@ -61,8 +61,9 @@ warn "halde MAC değişimi artık kullanılmayan eski arayüz için yapılmaya d
 # ---------------------------------------------------------------------------
 # 2) Paketler
 # ---------------------------------------------------------------------------
-log "Pacman paketleri yükleniyor..."
-sudo pacman -S macchanger --needed --noconfirm || die "macchanger kurulamadı."
+log "NetworkManager kontrol ediliyor..."
+require_cmd nmcli || die "NetworkManager (nmcli) bulunamadı. Bu proje NetworkManager ile çalışır."
+
 
 log "Cloudflare WARP kontrol ediliyor..."
 if ! require_cmd warp-cli; then
@@ -118,75 +119,37 @@ fi
 require_cmd warp-cli || die "warp-cli kurulumdan sonra bulunamadı."
 
 # ---------------------------------------------------------------------------
-# 3) NetworkManager'ın kendi MAC yönetimini devre dışı bırak
-#    (macchanger ile çakışmaması için)
+# 3) NetworkManager native MAC privacy
 # ---------------------------------------------------------------------------
-if require_cmd nmcli; then
-    log "NetworkManager MAC yönetimi macchanger ile çakışmasın diye 'preserve' yapılıyor..."
-    sudo mkdir -p /etc/NetworkManager/conf.d/
-    printf '[device]
-wifi.scan-rand-mac-address=no
+# macchanger.service eski mimariden kaldırılır. NetworkManager'ın kendi
+# cloned-mac-address mekanizması kullanılır; böylece MAC değişimi ile
+# NetworkManager daemon restart'i veya ayrı bir systemd servisi arasında
+# yarış oluşmaz.
+log "Eski macchanger yapılandırması temizleniyor..."
 
-[connection]
-wifi.cloned-mac-address=preserve
-ethernet.cloned-mac-address=preserve
-' | sudo tee /etc/NetworkManager/conf.d/10-mac-preserve.conf > /dev/null
+if systemctl is-active --quiet macchanger.service || systemctl is-enabled --quiet macchanger.service 2>/dev/null; then
+    sudo systemctl disable --now macchanger.service >/dev/null 2>&1 || true
 fi
-
-# ---------------------------------------------------------------------------
-# 4) MAC Changer systemd servisi
-# ---------------------------------------------------------------------------
-# Bu değer, macchanger uygulanmadan önceki gerçek kernel MAC'idir. Böylece
-# ethtool gibi ek paketlere ihtiyaç duymadan macchanger'ın gerçekten bir
-# değişiklik yapıp yapmadığını doğrulayabiliriz.
-ORIGINAL_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
-[ -n "$ORIGINAL_MAC" ] || die "$INTERFACE için mevcut MAC adresi okunamadı."
-
-log "MAC Changer servisi oluşturuluyor ($INTERFACE için)..."
-
-# systemd device unit adları özel karakterler için escape gerektirir
-# (örn. arayüz adında '-' varsa). systemd-escape ile doğru isim üretilir.
-ESCAPED_IFACE=$(systemd-escape "$INTERFACE")
-
-printf '[Unit]
-Description=macchanger on %s
-Wants=network-pre.target
-Before=network-pre.target NetworkManager.service
-BindsTo=sys-subsystem-net-devices-%s.device
-After=sys-subsystem-net-devices-%s.device
-
-[Service]
-Type=oneshot
-ExecStart=/usr/bin/ip link set dev %s down
-ExecStart=/usr/bin/macchanger -r %s
-ExecStart=/usr/bin/ip link set dev %s up
-RemainAfterExit=yes
-
-[Install]
-WantedBy=network-pre.target
-' "$INTERFACE" "$ESCAPED_IFACE" "$ESCAPED_IFACE" "$INTERFACE" "$INTERFACE" "$INTERFACE" \
-    | sudo tee /etc/systemd/system/macchanger.service > /dev/null
-
+sudo rm -f /etc/systemd/system/macchanger.service
+sudo rm -f /etc/NetworkManager/conf.d/10-mac-preserve.conf
 sudo systemctl daemon-reload
-sudo systemctl enable macchanger.service || die "macchanger.service etkinleştirilemedi."
-sudo systemctl start macchanger.service || die "macchanger.service başlatılamadı. Ayrıntı: journalctl -u macchanger.service"
 
-# macchanger gerçekten farklı bir MAC atadı mı?
-# Servisin "active (exited)" olması tek başına yeterli değildir; cihazın
-# kernel'deki mevcut adresini ayrıca doğruluyoruz.
-RANDOMIZED_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
+log "NetworkManager native MAC gizliliği yapılandırılıyor..."
+sudo install -d -m 0755 /etc/NetworkManager/conf.d
+sudo tee /etc/NetworkManager/conf.d/20-arch-privacy-mac.conf > /dev/null <<'EOF'
+[connection]
+# Wi-Fi: aynı SSID için stabil, farklı SSID'ler için farklı yerel MAC.
+wifi.cloned-mac-address=stable-ssid
 
-if [ -z "$RANDOMIZED_MAC" ]; then
-    die "MAC adresi okunamadı: $INTERFACE"
-fi
+# Ethernet: makineye/profil kimliğine göre stabil yerel MAC.
+ethernet.cloned-mac-address=stable
+EOF
 
-if [ "$RANDOMIZED_MAC" = "$ORIGINAL_MAC" ]; then
-    die "macchanger çalıştı ancak $INTERFACE MAC adresini değiştirmedi ($RANDOMIZED_MAC). journalctl -u macchanger.service ile hatayı inceleyin."
-fi
+# Yalnızca NetworkManager yapılandırmasını yeniden yükle. Daemon restart
+# yapılmaz; bu özellikle WARP/tünel state'inin bozulmasını önler.
+sudo nmcli general reload conf || die "NetworkManager yapılandırması yeniden yüklenemedi."
 
-log "MAC adresi doğrulandı: $RANDOMIZED_MAC"
-
-
+# 4) Cloudflare WARP
 # ---------------------------------------------------------------------------
 # 5) Cloudflare WARP
 # ---------------------------------------------------------------------------
@@ -353,32 +316,44 @@ EOF
 sudo chmod 0755 /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp
 
 # ---------------------------------------------------------------------------
-# 7) NetworkManager yeniden başlatıldıktan sonra MAC'i tekrar doğrula
+# 7) Native MAC ayarını mevcut bağlantıda güvenli şekilde uygula
 # ---------------------------------------------------------------------------
-# NetworkManager'ın "preserve" ayarı MAC'i aktivasyon sırasında değiştirmemesi
-# gerektiğini söyler. Yine de kurulumun gerçek sonucunu kontrol ediyoruz.
+# Global default yalnızca profil explicit olarak başka bir değer istemiyorsa
+# kullanılır. Mevcut aktif Wi-Fi profilinin explicit bir MAC politikası varsa
+# kullanıcı ayarına dokunmayız; sonraki bağlantılarda global default uygulanır.
+# Aktif bağlantı varsa, MAC'in hemen uygulanabilmesi için yalnızca o bağlantı
+# kapatılıp tekrar açılır. NetworkManager daemon'u kesinlikle restart edilmez.
+ACTIVE_TYPE="$(nmcli -g GENERAL.TYPE device show "$INTERFACE" 2>/dev/null || true)"
+ACTIVE_CONNECTION="$(nmcli -g GENERAL.CONNECTION device show "$INTERFACE" 2>/dev/null || true)"
+
 warp-cli --accept-tos disconnect >/dev/null 2>&1 || true
 
-sudo systemctl daemon-reload
-sudo systemctl restart NetworkManager
+if [ "$ACTIVE_TYPE" = "wifi" ] && [ -n "$ACTIVE_CONNECTION" ] && [ "$ACTIVE_CONNECTION" != "--" ]; then
+    PROFILE_MAC="$(nmcli -g 802-11-wireless.cloned-mac-address connection show "$ACTIVE_CONNECTION" 2>/dev/null || true)"
+
+    if [ -z "$PROFILE_MAC" ] || [ "$PROFILE_MAC" = "--" ]; then
+        log "Aktif Wi-Fi profili yeniden etkinleştiriliyor; stable-ssid MAC uygulanacak..."
+        if ! nmcli connection down id "$ACTIVE_CONNECTION" >/dev/null 2>&1; then
+            warn "Aktif Wi-Fi bağlantısı kontrollü olarak kapatılamadı; mevcut bağlantı korunuyor."
+        elif ! nmcli connection up id "$ACTIVE_CONNECTION" ifname "$INTERFACE" >/dev/null 2>&1; then
+            warn "Wi-Fi yeniden bağlanamadı; NetworkManager cihazı tekrar bağlamayı deniyor."
+            nmcli device connect "$INTERFACE" >/dev/null 2>&1 || true
+        fi
+    else
+        warn "Aktif Wi-Fi profili explicit MAC politikası kullanıyor: $PROFILE_MAC"
+        warn "Kullanıcı profilini değiştirmiyorum; global stable-ssid ayarı sonraki uygun profillerde kullanılacak."
+    fi
+fi
 
 sleep 2
 
-CURRENT_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
-if [ "$CURRENT_MAC" != "$RANDOMIZED_MAC" ]; then
-    warn "NetworkManager yeniden başlatıldıktan sonra MAC değişti ($CURRENT_MAC)."
-    warn "macchanger tekrar uygulanıyor ve ardından MAC yeniden doğrulanıyor."
-    sudo systemctl restart macchanger.service || die "macchanger.service yeniden başlatılamadı."
-    CURRENT_MAC="$(ip -o link show dev "$INTERFACE" | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
-    if [ "$CURRENT_MAC" = "$ORIGINAL_MAC" ]; then
-        die "MAC randomizasyonu doğrulanamadı; NetworkManager MAC'i geri alıyor olabilir. journalctl -u macchanger.service ve NetworkManager günlüklerini kontrol edin."
-    fi
-    RANDOMIZED_MAC="$CURRENT_MAC"
+CURRENT_MAC="$(ip -o link show dev "$INTERFACE" 2>/dev/null | awk '{print $17}' | tr '[:upper:]' '[:lower:]')"
+if [ -z "$CURRENT_MAC" ]; then
+    die "$INTERFACE için mevcut MAC adresi okunamadı."
 fi
 
-log "NetworkManager sonrasında MAC doğrulandı: $CURRENT_MAC"
+log "NetworkManager native MAC politikası etkin. Mevcut MAC: $CURRENT_MAC"
 
-# ---------------------------------------------------------------------------
 # 8) NetworkManager "sınırlı bağlantı" (?) ikonu düzeltmesi
 # ---------------------------------------------------------------------------
 # Captive-portal connectivity check'i WARP dayanıklılığı için gerekli değildir.
@@ -397,12 +372,14 @@ echo "======================================================================"
 echo "[✓] Kurulum tamamlandı!"
 echo
 echo "Servis durumları:"
-systemctl is-active macchanger.service        2>/dev/null | xargs -I{} echo "  - macchanger.service       : {}"
 systemctl is-active warp-svc.service          2>/dev/null | xargs -I{} echo "  - warp-svc.service         : {}"
 systemctl is-enabled warp-autoconnect.service 2>/dev/null | xargs -I{} echo "  - warp-autoconnect.service : {}"
 echo
 echo "MAC adresi:"
-macchanger -s "$INTERFACE" 2>/dev/null || warn "macchanger -s $INTERFACE çalıştırılamadı."
+printf "  - Arayüz                  : %s\n" "$INTERFACE"
+printf "  - Mevcut MAC             : %s\n" "$CURRENT_MAC"
+printf "  - Wi-Fi politikası       : stable-ssid\n"
+printf "  - Ethernet politikası    : stable\n"
 echo
 echo "WARP durumu:"
 warp-cli --accept-tos status 2>/dev/null || true
@@ -423,7 +400,8 @@ echo "[i] WARP doğrulaması için Cloudflare'ın önerdiği trace yöntemi kull
 echo "    curl -s https://www.cloudflare.com/cdn-cgi/trace"
 echo "    Çıktıda 'warp=on' görünmelidir."
 echo
-echo "[!] HATIRLATMA: macchanger.service şu an sadece '$INTERFACE' arayüzü"
-echo "    için ayarlandı. Wi-Fi <-> Ethernet arasında MAC randomizasyonunu"
-echo "    yeni arayüze taşımak için scripti yeniden çalıştırın."
+echo "[i] MAC yönetimi artık NetworkManager tarafından native olarak yapılır."
+echo "    Wi-Fi: aynı SSID'de stabil, farklı SSID'lerde farklı MAC."
+echo "    Ethernet: stabil native MAC."
+echo "    NetworkManager daemon'u MAC değişimi için restart edilmez."
 echo "======================================================================"
