@@ -1,0 +1,10 @@
+# Local editor / OS files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Local test artifacts
+coverage/
+tmp/

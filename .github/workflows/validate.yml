@@ -9,5 +9,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Validate setup script and project metadata
+      - name: Validate Phase 0
         run: bash tests/test_setup.sh
