@@ -11,7 +11,7 @@ The project combines NetworkManager's native MAC privacy features with Cloudflar
 - **Per-network Wi-Fi identity** — Wi-Fi uses `stable-ssid`, so the same SSID gets a stable local MAC while different SSIDs get different MACs.
 - **Stable Ethernet identity** — Ethernet uses NetworkManager's native `stable` MAC mode.
 - **No NetworkManager daemon restart for MAC changes** — configuration is reloaded through `nmcli general reload conf`; the active Wi-Fi connection is only reactivated when needed.
-- **Cloudflare WARP** — installs and enables automatic WARP startup.
+- **Cloudflare WARP** — installs and enables automatic WARP startup without blocking the setup script on tunnel verification.
 - **WARP network resilience** — re-synchronizes WARP after NetworkManager connection changes through a dedicated recovery service and dispatcher.
 - **End-to-end WARP verification** — verifies Cloudflare's trace endpoint and expects `warp=on`, rather than trusting `warp-cli status` alone.
 - **Safe WARP recovery** — retries a broken tunnel once and disconnects WARP if the data path still fails, preserving ordinary Internet access.
@@ -61,6 +61,8 @@ The setup order is deliberately conservative:
 8. If the first WARP path fails, reconnect once.
 9. If the second attempt fails, disconnect WARP so ordinary Internet access is not left behind a broken tunnel.
 10. Repeat WARP recovery when NetworkManager reports a relevant connection change.
+
+The initial WARP autoconnect helper is started asynchronously. This is intentional: WARP may take time to validate the network, build its tunnel, configure routing/firewall state, and verify end-to-end traffic. The setup script must remain responsive while that happens.
 
 The project does **not** globally flush nftables rules and does not restart NetworkManager as part of MAC randomization.
 
