@@ -27,7 +27,7 @@ The complete planned privacy-hardening implementation is now present in the repo
 - systemd-resolved active.
 - sudo.
 - nmcli.
-- base64 and tac.
+- base64, tac and flock.
 
 The project does not install or replace a network manager.
 
@@ -54,7 +54,7 @@ The setup:
 
 **Keep the terminal open until the audit finishes.**
 
-The setup does not forcibly disconnect an active connection. Some connection-activation settings take full effect after reconnect or reboot.
+The setup does not forcibly disconnect an active connection. Some connection-activation settings take full effect after reconnect or reboot. NetworkManager's systemd-resolved DNS backend is selected explicitly so the per-connection DoT/DNSSEC settings have a compatible backend.
 
 ## Implemented privacy layers
 
@@ -70,7 +70,7 @@ NetworkManager scan randomization is explicitly enabled.
 
 ### Quad9 encrypted DNS
 
-Managed profiles use:
+Managed Wi-Fi/Ethernet profiles use:
 
 - IPv4: `9.9.9.9`, `149.112.112.112`
 - IPv6: `2620:fe::fe`, `2620:fe::9`
@@ -78,6 +78,14 @@ Managed profiles use:
 - DNS-over-TLS: required.
 - DNSSEC: required.
 - DHCP-provided DNS: ignored.
+
+The NetworkManager systemd-resolved DNS backend is selected explicitly. This is required because NetworkManager's per-connection DNS-over-TLS setting only has an effect with a compatible DNS plugin such as `systemd-resolved`. The project still requires live packet-level testing to prove that queries actually leave through TCP/853.
+
+### Defaults for newly created profiles
+
+NetworkManager global connection defaults are also configured for MAC randomization, DoT, DNSSEC, LLMNR/mDNS, DHCP identity and IPv6 privacy. Explicit settings already present on a profile remain authoritative.
+
+The project cannot safely force Quad9 addresses as a global DNS override because doing so would interfere with VPN/split-DNS and other connection-specific DNS routing. Therefore newly created profiles inherit the privacy defaults, while the complete Quad9 server list is applied to the profiles present when setup runs.
 
 ### DHCP privacy
 
@@ -120,7 +128,7 @@ If networking stops working, DNS fails, Wi-Fi cannot reconnect, IPv6 causes prob
 ./rollback.sh
 ```
 
-Rollback is designed to work **without internet access** because it restores local NetworkManager state from:
+Rollback is designed to work **without internet access** because it restores local NetworkManager state from. It verifies each restored property before deleting the rollback state:
 
 ```
 /var/lib/arch-privacy-setup/
@@ -140,6 +148,8 @@ If setup itself encounters an error, it automatically attempts the same rollback
 - Previous IPv6 address/privacy settings.
 - Previous LLMNR/mDNS settings.
 - Previous project-owned NetworkManager scan configuration.
+
+If any restore or verification step fails, rollback exits non-zero and **preserves the state directory** so it can be retried.
 
 It does **not**:
 
