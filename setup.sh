@@ -151,6 +151,30 @@ sudo nmcli general reload conf || die "NetworkManager yapılandırması yeniden 
 
 # 4) Cloudflare WARP
 # ---------------------------------------------------------------------------
+# Global defaults are a fallback, but existing profiles should carry the
+# intended policy explicitly so NetworkManager applies it on activation.
+# Existing explicit MAC policies are respected and never overwritten.
+log "Mevcut NetworkManager profilleri denetleniyor..."
+
+while IFS=: read -r PROFILE_UUID PROFILE_TYPE; do
+    [ -n "$PROFILE_UUID" ] || continue
+
+    case "$PROFILE_TYPE" in
+        802-11-wireless)
+            PROFILE_MAC="$(nmcli -g 802-11-wireless.cloned-mac-address connection show uuid "$PROFILE_UUID" 2>/dev/null || true)"
+            if [ -z "$PROFILE_MAC" ] || [ "$PROFILE_MAC" = "--" ]; then
+                nmcli connection modify uuid "$PROFILE_UUID" 802-11-wireless.cloned-mac-address stable-ssid >/dev/null 2>&1                     || warn "Wi-Fi profiline stable-ssid uygulanamadı: $PROFILE_UUID"
+            fi
+            ;;
+        802-3-ethernet)
+            PROFILE_MAC="$(nmcli -g 802-3-ethernet.cloned-mac-address connection show uuid "$PROFILE_UUID" 2>/dev/null || true)"
+            if [ -z "$PROFILE_MAC" ] || [ "$PROFILE_MAC" = "--" ]; then
+                nmcli connection modify uuid "$PROFILE_UUID" 802-3-ethernet.cloned-mac-address stable >/dev/null 2>&1                     || warn "Ethernet profiline stable MAC uygulanamadı: $PROFILE_UUID"
+            fi
+            ;;
+    esac
+done < <(nmcli -t -f UUID,TYPE connection show 2>/dev/null)
+
 log "Cloudflare WARP servisi başlatılıyor..."
 sudo systemctl enable --now warp-svc.service || die "warp-svc.service başlatılamadı."
 
