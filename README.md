@@ -10,11 +10,15 @@ The new architecture deliberately avoids Cloudflare WARP, custom MAC-changing da
 
 ## Current status
 
-**Phase 0 — Architecture Cleanup** is complete.
+**Phase 1 — MAC Privacy** is implemented; hardware validation is still pending.
 
-The repository is currently a clean foundation for the new implementation. The cleanup stage removes the previous WARP-based architecture and does **not** install replacement privacy settings yet.
+The project now uses NetworkManager-native MAC randomization. It works at the connection-profile level, so the same mechanism applies to home/router Wi-Fi and phone hotspots. It does not forcibly restart active connections.
 
 This is intentional: no privacy feature is enabled until it has its own implementation and verification tests.
+
+## Current MAC behavior
+
+NetworkManager's `random` policy generates a randomized MAC when a connection is activated. This is intentionally different from a custom "change once at boot" daemon. Reboot, reconnect, suspend/resume, hotspot, and DHCP behavior must be validated on real hardware before those guarantees are claimed.
 
 ## New architecture
 
