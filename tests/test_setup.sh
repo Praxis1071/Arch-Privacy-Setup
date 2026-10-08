@@ -6,6 +6,7 @@ bash -n "$ROOT/setup.sh" "$ROOT/rollback.sh" "$ROOT/audit.sh" "$ROOT/lib/common.
 
 grep -q "802-11-wireless.cloned-mac-address random" "$ROOT/lib/mac.sh"
 grep -q "802-3-ethernet.cloned-mac-address random" "$ROOT/lib/mac.sh"
+grep -q "backup_property" "$ROOT/lib/mac.sh"
 grep -q "wifi.scan-rand-mac-address=yes" "$ROOT/lib/privacy.sh"
 grep -q "connection.dns-over-tls yes" "$ROOT/lib/privacy.sh"
 grep -q "connection.dnssec yes" "$ROOT/lib/privacy.sh"
