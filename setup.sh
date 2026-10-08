@@ -38,7 +38,11 @@ require_cmd() {
 # ---------------------------------------------------------------------------
 log "Aktif ağ arayüzü aranıyor..."
 
-INTERFACE=$(ip route | awk '/^default/ {print $5; exit}')
+INTERFACE=$(ip -o route show default 2>/dev/null     | awk '{print $5}'     | grep -Ev "$VIRTUAL_IFACE_REGEX"     | head -n 1)
+
+if [ -z "${INTERFACE:-}" ] && require_cmd nmcli; then
+    INTERFACE=$(nmcli -t -f DEVICE,TYPE,STATE device status 2>/dev/null         | awk -F: '$2 ~ /^(wifi|ethernet)$/ && $3 ~ /^(connected|connecting)$/ {print $1; exit}')
+fi
 
 if [ -z "${INTERFACE:-}" ]; then
     INTERFACE=$(ip -o link show | awk -F': ' '{print $2}' | grep -Ev "$VIRTUAL_IFACE_REGEX" | head -n 1)
