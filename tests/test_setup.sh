@@ -8,11 +8,26 @@ LICENSE="$ROOT/LICENSE"
 
 bash -n "$SETUP"
 
+grep -q 'wifi.cloned-mac-address=stable-ssid' "$SETUP"
+grep -q 'ethernet.cloned-mac-address=stable' "$SETUP"
+grep -q 'nmcli general reload conf' "$SETUP"
+grep -q '20-arch-privacy-mac.conf' "$SETUP"
+grep -q 'macchanger.service' "$SETUP"
+
+if grep -q 'pacman -S macchanger' "$SETUP"; then
+    echo "setup.sh must not install macchanger anymore" >&2
+    exit 1
+fi
+if grep -q 'macchanger -r' "$SETUP" || grep -q 'macchanger -s' "$SETUP"; then
+    echo "setup.sh must not invoke macchanger anymore" >&2
+    exit 1
+fi
+if grep -q 'systemctl restart NetworkManager' "$SETUP"; then
+    echo "setup.sh must not restart NetworkManager" >&2
+    exit 1
+fi
+
 grep -q 'registration show' "$SETUP"
-grep -q 'WantedBy=network-pre.target' "$SETUP"
-grep -q 'ORIGINAL_MAC=' "$SETUP"
-grep -q 'RANDOMIZED_MAC=' "$SETUP"
-grep -q 'NetworkManager sonrasında MAC doğrulandı' "$SETUP"
 grep -q 'arch-privacy-warp.lock' "$SETUP"
 grep -q 'flock -n 9' "$SETUP"
 grep -q 'for _ in $(seq 1 3)' "$SETUP"
@@ -29,10 +44,8 @@ if grep -qi 'GNU General Public License' "$README"; then
     echo "README still contains the old GPL license statement" >&2
     exit 1
 fi
-
 grep -q '^MIT License$' "$LICENSE"
 
-# Validate shell scripts embedded in setup.sh.
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
 
@@ -41,7 +54,6 @@ awk '
   capture && /^EOF$/ {exit}
   capture {print}
 ' "$SETUP" > "$tmpdir/arch-privacy-warp-connect"
-
 bash -n "$tmpdir/arch-privacy-warp-connect"
 
 awk '
@@ -49,7 +61,6 @@ awk '
   capture && /^EOF$/ {exit}
   capture {print}
 ' "$SETUP" > "$tmpdir/90-arch-privacy-warp"
-
 bash -n "$tmpdir/90-arch-privacy-warp"
 
-echo "Arch Privacy Setup static checks passed."
+echo "Arch Privacy Setup native NetworkManager MAC checks passed."

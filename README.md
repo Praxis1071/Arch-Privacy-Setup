@@ -2,45 +2,75 @@
 
 An automated privacy-oriented setup for Arch-based Linux systems such as CachyOS.
 
-The project automates boot-time MAC address randomization and Cloudflare WARP setup while keeping the configuration focused on NetworkManager and systemd.
+The project combines NetworkManager's native MAC privacy features with Cloudflare WARP while keeping the network recovery logic conservative and reversible.
 
 ## Features
 
-- **Automatic network interface detection** — detects the active physical interface and ignores common virtual interfaces such as Docker, bridges, WireGuard, TUN and VM interfaces.
-- **MAC address randomization** — assigns a randomized MAC address before NetworkManager starts and verifies that the kernel actually accepted the change.
-- **NetworkManager integration** — configures NetworkManager to preserve the MAC assigned by macchanger instead of replacing it during connection activation.
-- **Cloudflare WARP** — installs and enables a service that reconnects WARP during system startup.
-- **WARP network resilience** — re-synchronizes WARP after NetworkManager connection changes, including Wi-Fi/hotspot reconnects and DHCP changes, through a dedicated recovery service.
-- **End-to-end WARP verification** — does not treat warp-cli status alone as proof of working Internet traffic; it verifies the Cloudflare trace endpoint and expects warp=on.
-- **Safe WARP recovery** — if WARP reports connected but its data path is broken, the setup retries the tunnel and disconnects the broken tunnel rather than leaving the host without normal Internet access.
-- **Idempotent setup** — can be run again to update the configuration safely.
-- **Error-aware installation** — handles already registered or connected WARP states without treating them as fatal errors.
+- **Automatic physical interface detection** — ignores common virtual interfaces, including Docker, WireGuard, TUN/TAP and Cloudflare WARP.
+- **Native NetworkManager MAC privacy** — uses NetworkManager instead of a separate macchanger systemd service.
+- **Per-network Wi-Fi identity** — Wi-Fi uses `stable-ssid`, so the same SSID gets a stable local MAC while different SSIDs get different MACs.
+- **Stable Ethernet identity** — Ethernet uses NetworkManager's native `stable` MAC mode.
+- **No NetworkManager daemon restart for MAC changes** — configuration is reloaded through `nmcli general reload conf`; the active Wi-Fi connection is only reactivated when needed.
+- **Cloudflare WARP** — installs and enables automatic WARP startup.
+- **WARP network resilience** — re-synchronizes WARP after NetworkManager connection changes through a dedicated recovery service and dispatcher.
+- **End-to-end WARP verification** — verifies Cloudflare's trace endpoint and expects `warp=on`, rather than trusting `warp-cli status` alone.
+- **Safe WARP recovery** — retries a broken tunnel once and disconnects WARP if the data path still fails, preserving ordinary Internet access.
+- **Idempotent setup** — can be run again without recreating the old macchanger architecture.
+- **Migration cleanup** — removes the previous macchanger service and obsolete NetworkManager MAC-preserve configuration without uninstalling packages owned by the user.
+
+## MAC privacy architecture
+
+The project intentionally does **not** run `macchanger` as a boot-time systemd service.
+
+NetworkManager itself supports:
+
+- `stable-ssid` for Wi-Fi: the generated MAC is based on the SSID, so the same network receives a stable local MAC and different networks receive different MACs.
+- `stable` for Ethernet: the generated MAC is derived from the NetworkManager connection identity and host key.
+
+This avoids the previous race between macchanger, NetworkManager activation/restarts, and WARP tunnel state.
+
+The new architecture is:
+
+~~~text
+NetworkManager native MAC policy
+        ↓
+Wi-Fi / Ethernet connection
+        ↓
+normal network path
+        ↓
+Cloudflare WARP
+        ↓
+trace verification
+        ↓
+if WARP fails → disconnect WARP → preserve normal Internet
+~~~
+
+NetworkManager documents `stable-ssid` as a per-SSID hashed MAC and `stable` as a hashed MAC based on the connection's stable identity.
 
 ## WARP / NetworkManager compatibility
 
-The setup deliberately avoids connecting WARP before restarting NetworkManager. The previous order could leave WARP's tunnel/firewall state out of sync when NetworkManager was restarted afterwards.
+The setup order is deliberately conservative:
 
-The current order is:
+1. Remove any old macchanger service/configuration created by earlier versions.
+2. Configure NetworkManager's native MAC defaults.
+3. Reload NetworkManager configuration without restarting the daemon.
+4. Disconnect any existing WARP tunnel before a required Wi-Fi reactivation.
+5. Reactivate the current Wi-Fi profile only when its MAC property is unset, allowing the native `stable-ssid` policy to take effect.
+6. Start WARP only after a real default route exists.
+7. Verify the end-to-end path with Cloudflare's trace endpoint.
+8. If the first WARP path fails, reconnect once.
+9. If the second attempt fails, disconnect WARP so ordinary Internet access is not left behind a broken tunnel.
+10. Repeat WARP recovery when NetworkManager reports a relevant connection change.
 
-1. Configure NetworkManager.
-2. Apply and verify the randomized MAC address before NetworkManager starts managing the interface.
-3. Disconnect any existing WARP tunnel before restarting NetworkManager.
-4. Restart NetworkManager and verify that it preserved the randomized MAC.
-5. Wait for a real default route.
-6. Connect WARP.
-7. Verify the end-to-end path with Cloudflare's trace endpoint, with retries so a transient HTTPS failure is not treated as a tunnel failure.
-8. If recovery is necessary, reconnect WARP once; only disconnect WARP after the recovery attempt also fails.
-9. Re-run the WARP connection when NetworkManager reports a relevant interface change.
+The project does **not** globally flush nftables rules and does not restart NetworkManager as part of MAC randomization.
 
-NetworkManager dispatcher events are used instead of modifying routing tables or flushing nftables globally. The shared WARP helper uses a lock so overlapping dispatcher events cannot run competing disconnect/reconnect operations. This keeps the fix scoped to WARP and avoids destroying unrelated firewall state.
-
-Cloudflare's Linux documentation also recommends verifying the actual data path with:
+Cloudflare's current Linux documentation recommends the sequence `warp-cli registration new`, `warp-cli connect`, and verification through:
 
 ~~~bash
-curl --silent https://www.cloudflare.com/cdn-cgi/trace | grep '^warp=on$'
+curl https://www.cloudflare.com/cdn-cgi/trace
 ~~~
 
-See the official Cloudflare documentation for the current WARP CLI and verification workflow.
+The trace should contain `warp=on` when WARP is active.
 
 ## Usage
 
@@ -72,46 +102,51 @@ Review any remote script before executing it on a system you care about.
 - An AUR helper such as yay or paru, or permission for the script to install yay-bin
 - Cloudflare WARP
 
-The script can install the required AUR helper when one is not already available, after asking for confirmation.
+The setup no longer requires the `macchanger` package.
 
 ## Important notes
 
-- The setup changes systemd units and NetworkManager configuration.
+- The setup changes NetworkManager configuration and systemd units.
 - AUR packages should be reviewed before installation.
 - On systems with multiple physical network interfaces, verify the selected interface.
-- If you switch between Wi-Fi and Ethernet, run the setup again so the generated macchanger service targets the current interface.
-- MAC changes and WARP startup can temporarily interrupt network connectivity.
-- The generated `macchanger.service` is ordered through `network-pre.target`, so MAC randomization is attempted before NetworkManager activation. The setup also performs an explicit post-restart verification and retries macchanger if NetworkManager changes the address.
-- WARP recovery intentionally prefers restoring ordinary Internet connectivity over leaving a broken WARP tunnel in place.
-- The setup does **not** globally flush nftables rules. Existing firewall rules outside WARP are left intact.
+- Existing Wi-Fi profiles with an explicit `cloned-mac-address` value are respected. The setup does not overwrite those user choices.
+- Wi-Fi profiles without an explicit MAC policy use the global `stable-ssid` default.
+- MAC changes are applied by NetworkManager during connection activation. The project does not manipulate the kernel MAC directly.
+- The active Wi-Fi connection may be briefly disconnected and reconnected once during setup so the native policy can take effect. NetworkManager itself is not restarted.
+- WARP is disconnected before that controlled Wi-Fi reactivation to avoid coupling a tunnel transition with a MAC transition.
+- The setup does **not** globally flush nftables rules.
+- Re-running the setup migrates old macchanger installations to the native NetworkManager design.
 
-After setup, verify WARP manually:
+After setup, verify:
 
 ~~~bash
+nmcli -g 802-11-wireless.cloned-mac-address connection show "YOUR-WIFI-PROFILE"
+ip link show wlan0
 warp-cli --accept-tos status
 curl -s https://www.cloudflare.com/cdn-cgi/trace
 ~~~
 
-The trace output should report warp=on when WARP is active.
+For a profile that inherits the global default, the connection property may be empty while NetworkManager applies `stable-ssid` during activation. The actual kernel MAC shown by `ip link` is the authoritative result.
 
 ## Removal
 
-If you want to remove only the components created by this setup:
+To remove only the components created by this setup:
 
 ~~~bash
-sudo systemctl disable --now macchanger.service warp-autoconnect.service warp-network-recover.service
-sudo rm -f /etc/systemd/system/macchanger.service
+sudo systemctl disable --now warp-autoconnect.service warp-network-recover.service
 sudo rm -f /etc/systemd/system/warp-autoconnect.service
 sudo rm -f /etc/systemd/system/warp-network-recover.service
 sudo rm -f /usr/local/libexec/arch-privacy-warp-connect
 sudo rm -f /etc/NetworkManager/dispatcher.d/90-arch-privacy-warp
-sudo rm -f /etc/NetworkManager/conf.d/10-mac-preserve.conf
+sudo rm -f /etc/NetworkManager/conf.d/20-arch-privacy-mac.conf
 sudo systemctl daemon-reload
-sudo systemctl restart NetworkManager
+sudo nmcli general reload conf
 warp-cli --accept-tos disconnect
 ~~~
 
-This does not uninstall Cloudflare WARP itself.
+If you are migrating from an older release, the setup also removes the old `macchanger.service` and `10-mac-preserve.conf` automatically.
+
+This does not uninstall Cloudflare WARP or the `macchanger` package. The project never removes packages that the user may have installed for other purposes.
 
 ## License
 
