@@ -1,6 +1,6 @@
 # Architecture
 
-The project uses NetworkManager and systemd-resolved as the primary native mechanisms. The NetworkManager `systemd-resolved` DNS backend is selected explicitly so per-connection DNS-over-TLS and DNSSEC settings have a supported backend. NetworkManager documents that these settings have no effect without a compatible DNS plugin. citeturn0search2turn0search4
+The project uses NetworkManager and systemd-resolved as the primary native mechanisms. The NetworkManager `systemd-resolved` DNS backend is selected explicitly so per-connection DNS-over-TLS and DNSSEC settings have a supported backend. NetworkManager documents that these settings have no effect without a compatible DNS plugin.
 
 ## Implemented layers
 
@@ -23,9 +23,9 @@ Global connection defaults also cover associated Wi-Fi/Ethernet MAC randomizatio
 - DNSSEC is enabled.
 - DHCP-provided DNS is ignored on managed profiles.
 
-The implementation requires an active `systemd-resolved` service because NetworkManager's DNS-over-TLS setting requires a compatible DNS backend. The current NetworkManager documentation identifies `dns-systemd-resolved` as a supported DoT plugin. citeturn0search2
+The implementation requires an active `systemd-resolved` service because NetworkManager's DNS-over-TLS setting requires a compatible DNS backend. The current NetworkManager documentation identifies `dns-systemd-resolved` as a supported DoT plugin.
 
-The audit verifies configuration, but it does not claim packet-level proof of encrypted DNS. Quad9's documentation recommends packet capture of port 853 when verifying encrypted DNS. citeturn0search9
+The audit verifies configuration, but it does not claim packet-level proof of encrypted DNS. Quad9's documentation recommends packet capture of port 853 when verifying encrypted DNS.
 
 ### DHCP privacy
 - IPv4 DHCP client identifier: `stable`.
