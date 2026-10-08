@@ -2,79 +2,175 @@
 
 A conservative privacy-hardening project for Arch Linux and Arch-based systems such as CachyOS.
 
-The project is being rebuilt around one priority:
+The goal is practical network privacy without turning networking into a fragile stack.
 
-> **Improve practical network privacy without sacrificing network stability.**
+## Current implementation
 
-The new architecture deliberately avoids Cloudflare WARP, custom MAC-changing daemons, and broad firewall resets. NetworkManager and systemd will be preferred wherever they provide a native, reliable mechanism.
+The complete planned privacy-hardening implementation is now present in the repository:
 
-## Current status
+- NetworkManager-native randomized MAC addresses.
+- Randomized MAC during Wi-Fi scanning.
+- Quad9 DNS with DNS-over-TLS.
+- DNSSEC.
+- DHCP identity hardening.
+- IPv6 stable-privacy and temporary-address preference.
+- LLMNR and mDNS disabled on managed Wi-Fi/Ethernet profiles.
+- Read-only audit.
+- Automatic and manual rollback.
 
-**Phase 1 — MAC Privacy** is implemented; hardware validation is still pending.
+**Real hardware validation is intentionally still separate.** The implementation is in place, but reboot, reconnect, Android hotspot, home/router Wi-Fi, suspend/resume, IPv4/IPv6 and DNS behavior must be validated on actual hardware before final release sign-off.
 
-The project now uses NetworkManager-native MAC randomization. It works at the connection-profile level, so the same mechanism applies to home/router Wi-Fi and phone hotspots. It does not forcibly restart active connections.
+## Requirements
 
-This is intentional: no privacy feature is enabled until it has its own implementation and verification tests.
+- Arch Linux or an Arch-based distribution.
+- NetworkManager.
+- systemd-resolved active.
+- sudo.
+- nmcli.
+- base64 and tac.
 
-## Current MAC behavior
+The project does not install or replace a network manager.
 
-NetworkManager's `random` policy generates a randomized MAC when a connection is activated. This is intentionally different from a custom "change once at boot" daemon. Reboot, reconnect, suspend/resume, hotspot, and DHCP behavior must be validated on real hardware before those guarantees are claimed.
+## Apply
 
-## New architecture
+Clone the repository and run:
 
-Planned components:
-
-```text
-setup.sh
-├── lib/
-│   ├── common.sh
-│   ├── cleanup.sh
-│   └── ...
-├── config/
-│   └── ...
-├── tests/
-│   └── ...
-└── docs/
-    └── ARCHITECTURE.md
+```bash
+cd Arch-Privacy-Setup
+chmod +x setup.sh rollback.sh audit.sh
+./setup.sh
 ```
 
-The implementation will follow:
+The setup:
 
-**Detect → Apply → Verify → Roll back on failure**
+1. Checks prerequisites before changing anything.
+2. Refuses to overwrite an existing rollback state.
+3. Backs up every NetworkManager property it changes.
+4. Backs up its project-owned NetworkManager configuration.
+5. Applies all implemented privacy layers.
+6. Reloads NetworkManager configuration without forcibly restarting NetworkManager.
+7. Runs a read-only audit.
+8. Automatically attempts rollback if setup fails.
 
-No feature should be considered complete merely because a configuration file was written. It must also be checked against the live system.
+**Keep the terminal open until the audit finishes.**
 
-## Privacy roadmap
+The setup does not forcibly disconnect an active connection. Some connection-activation settings take full effect after reconnect or reboot.
 
-See [ROADMAP.md](ROADMAP.md).
+## Implemented privacy layers
 
-The approved direction is:
+### MAC privacy
 
-1. Remove the old WARP architecture.
-2. Implement NetworkManager-native MAC randomization.
-3. Enable Wi-Fi scan MAC randomization where appropriate.
-4. Implement encrypted DNS using Quad9.
-5. Review DHCP identity and hostname exposure.
-6. Review IPv6 privacy without disabling IPv6.
-7. Review LLMNR/mDNS exposure with compatibility safeguards.
-8. Add a read-only privacy audit.
-9. Add safe apply/verification/rollback behavior.
-10. Test on real Arch/CachyOS hardware and common Wi-Fi/hotspot scenarios.
+- Wi-Fi profiles: `cloned-mac-address=random`.
+- Ethernet profiles: `cloned-mac-address=random`.
+- Existing explicit MAC policies are preserved.
 
-### DNS note
+### Wi-Fi scan privacy
 
-The project will use **Quad9** rather than building the new design around Mullvad's public DNS service. This avoids depending on a public DNS service that is being retired.
+NetworkManager scan randomization is explicitly enabled.
 
-## Safety principles
+### Quad9 encrypted DNS
 
-- Do not globally flush nftables.
-- Do not restart NetworkManager unnecessarily.
-- Do not replace NetworkManager with a custom network manager.
-- Do not use `macchanger` as a boot-time service.
-- Do not silently uninstall packages the user may need elsewhere.
-- Do not claim privacy improvements that have not been verified.
-- Preserve user-managed network profiles where possible.
-- Prefer reversible configuration changes.
+Managed profiles use:
+
+- IPv4: `9.9.9.9`, `149.112.112.112`
+- IPv6: `2620:fe::fe`, `2620:fe::9`
+- TLS server name: `dns.quad9.net`
+- DNS-over-TLS: required.
+- DNSSEC: required.
+- DHCP-provided DNS: ignored.
+
+### DHCP privacy
+
+Managed profiles use stable NetworkManager DHCP identifiers rather than identifiers derived directly from the permanent hardware MAC. DHCP hostname transmission is disabled.
+
+### IPv6 privacy
+
+IPv6 is **not disabled**.
+
+The project uses NetworkManager stable-privacy address generation and prefers temporary IPv6 addresses.
+
+### Local-network privacy
+
+LLMNR and mDNS are disabled for managed Wi-Fi/Ethernet profiles.
+
+This can affect:
+
+- `.local` name resolution.
+- Network printer discovery.
+- AirPrint/Chromecast-style discovery.
+- Some LAN service discovery.
+
+If those features are needed, use rollback instead of manually editing profiles.
+
+## Audit
+
+Run the read-only audit at any time:
+
+```bash
+./audit.sh
+```
+
+It does not modify NetworkManager or firewall state.
+
+## IMPORTANT: emergency rollback
+
+If networking stops working, DNS fails, Wi-Fi cannot reconnect, IPv6 causes problems, or local discovery is needed again:
+
+```bash
+./rollback.sh
+```
+
+Rollback is designed to work **without internet access** because it restores local NetworkManager state from:
+
+```
+/var/lib/arch-privacy-setup/
+```
+
+After rollback, reconnect the affected network if necessary.
+
+If setup itself encounters an error, it automatically attempts the same rollback.
+
+### What rollback restores
+
+- Previous Wi-Fi MAC policy.
+- Previous Ethernet MAC policy.
+- Previous DNS servers and automatic-DNS behavior.
+- Previous DNS-over-TLS and DNSSEC values.
+- Previous DHCP client ID, IAID, DUID and hostname settings.
+- Previous IPv6 address/privacy settings.
+- Previous LLMNR/mDNS settings.
+- Previous project-owned NetworkManager scan configuration.
+
+It does **not**:
+
+- uninstall NetworkManager;
+- uninstall system packages;
+- remove unrelated connection profiles;
+- flush nftables;
+- forcibly restart NetworkManager.
+
+## Safety model
+
+The project follows:
+
+**Detect → Backup → Apply → Reload → Audit → Roll back on failure**
+
+No Cloudflare WARP, custom MAC daemon, macchanger, or global firewall reset is used.
+
+## Privacy limitations
+
+This project does not provide anonymity.
+
+It does not hide:
+
+- your public IP address;
+- your traffic from the ISP/network operator;
+- browser fingerprinting;
+- application-level tracking;
+- account identity;
+- traffic metadata outside the protected DNS channel.
+
+It focuses on reducing unnecessary network identity and name-resolution exposure while preserving normal IPv4/IPv6 networking.
 
 ## License
 
