@@ -1,44 +1,13 @@
 # Architecture
 
-## Current state
+Phase 1 uses NetworkManager-native MAC randomization.
 
-Phase 0 deliberately contains only the migration/cleanup entry point. It removes components owned by the previous WARP-based implementation without installing a replacement network policy.
+- Wi-Fi profiles use `802-11-wireless.cloned-mac-address=random`.
+- Ethernet profiles use `802-3-ethernet.cloned-mac-address=random`.
+- Existing explicit MAC policies are preserved.
+- Active connections are not forcibly restarted.
+- No custom daemon, macchanger service, firewall flush, or NetworkManager restart is used.
 
-## Target state
+NetworkManager documents `random` as generating a random MAC on each connection activation. Therefore the same design applies to home/router Wi-Fi and phone-hotspot Wi-Fi. It does **not** require cooperation from the upstream router/hotspot beyond accepting a normal client MAC.
 
-The new implementation will be layered:
-
-```text
-setup.sh
-  |
-  +-- detection
-  |
-  +-- configuration
-  |
-  +-- verification
-  |
-  +-- rollback
-  |
-  +-- audit
-```
-
-Feature layers will be implemented independently:
-
-- MAC privacy
-- Wi-Fi scan privacy
-- encrypted DNS
-- DHCP identity hardening
-- IPv6 privacy
-- local network discovery policy
-
-Each layer must have:
-
-1. a clear privacy objective,
-2. minimal system changes,
-3. a live-state verification method,
-4. a failure condition,
-5. a rollback path,
-6. automated static tests where possible,
-7. real-hardware validation for networking behavior.
-
-The architecture intentionally does not include a WARP tunnel, a custom MAC-changing daemon, or a global firewall reset.
+Hardware validation remains required before Phase 1 is declared fully complete.
