@@ -9,13 +9,17 @@ configure_mac_profiles() {
             802-11-wireless)
                 cloned="$(nmcli -g 802-11-wireless.cloned-mac-address connection show "$uuid" 2>/dev/null || true)"
                 if [ -z "$cloned" ] || [ "$cloned" = "--" ]; then
+                    backup_property "$uuid" 802-11-wireless.cloned-mac-address
                     sudo nmcli connection modify "$uuid" 802-11-wireless.cloned-mac-address random
-                fi ;;
+                fi
+                ;;
             802-3-ethernet)
                 cloned="$(nmcli -g 802-3-ethernet.cloned-mac-address connection show "$uuid" 2>/dev/null || true)"
                 if [ -z "$cloned" ] || [ "$cloned" = "--" ]; then
+                    backup_property "$uuid" 802-3-ethernet.cloned-mac-address
                     sudo nmcli connection modify "$uuid" 802-3-ethernet.cloned-mac-address random
-                fi ;;
+                fi
+                ;;
         esac
     done < <(nmcli -t -f UUID,TYPE connection show)
 }
