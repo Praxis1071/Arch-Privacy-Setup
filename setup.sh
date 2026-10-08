@@ -384,6 +384,10 @@ log "NetworkManager native MAC politikası etkin. Mevcut MAC: $CURRENT_MAC"
 
 sudo systemctl daemon-reload
 sudo systemctl enable warp-autoconnect.service
+# Stop a possibly running helper from an older setup invocation before
+# replacing/restarting the unit. This makes interrupted migrations recoverable.
+sudo systemctl stop warp-autoconnect.service >/dev/null 2>&1 || true
+sudo systemctl stop warp-network-recover.service >/dev/null 2>&1 || true
 sudo systemctl daemon-reload
 
 # WARP recovery helper intentionally runs asynchronously. It may need to wait
