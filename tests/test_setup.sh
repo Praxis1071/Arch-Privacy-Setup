@@ -10,6 +10,8 @@ bash -n "$SETUP"
 
 grep -q 'wifi.cloned-mac-address=stable-ssid' "$SETUP"
 grep -q 'ethernet.cloned-mac-address=stable' "$SETUP"
+grep -q '802-11-wireless.cloned-mac-address stable-ssid' "$SETUP"
+grep -q '802-3-ethernet.cloned-mac-address stable' "$SETUP"
 grep -q 'nmcli general reload conf' "$SETUP"
 grep -q '20-arch-privacy-mac.conf' "$SETUP"
 grep -q 'macchanger.service' "$SETUP"
