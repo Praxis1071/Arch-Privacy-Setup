@@ -128,7 +128,7 @@ If networking stops working, DNS fails, Wi-Fi cannot reconnect, IPv6 causes prob
 ./rollback.sh
 ```
 
-Rollback is designed to work **without internet access** because it restores local NetworkManager state from. It verifies each restored property before deleting the rollback state:
+Rollback is designed to work **without internet access** because it restores local NetworkManager state from `/var/lib/arch-privacy-setup/`. It verifies each restored property before deleting the rollback state:
 
 ```
 /var/lib/arch-privacy-setup/
