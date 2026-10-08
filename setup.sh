@@ -14,23 +14,33 @@ require_command nmcli
 require_command systemctl
 require_command base64
 require_command tac
+require_command flock
 
 nmcli general status >/dev/null 2>&1 || die "NetworkManager is not available."
 systemctl is-active --quiet systemd-resolved || die "systemd-resolved must be active for encrypted DNS. No changes were made."
+
+acquire_lock
 
 if sudo test -e "$STATE_DIR"; then
     die "An existing rollback state was found. Run ./rollback.sh first; refusing to overwrite it."
 fi
 
+# No changes have been made before this point. If backup creation fails,
+# leave the system untouched instead of attempting a partial rollback.
 state_init
 state_backup_config
 
 rollback_on_error() {
     warn "Setup failed. Starting automatic rollback..."
-    "$ROOT/rollback.sh" || warn "Automatic rollback also failed. Use ./rollback.sh manually."
+    ARCH_PRIVACY_SETUP_LOCK_HELD=1 "$ROOT/rollback.sh" || warn "Automatic rollback also failed. Use ./rollback.sh manually."
 }
 trap rollback_on_error ERR
-trap 'warn "Setup interrupted. Rollback state was preserved in $STATE_DIR."' INT TERM
+
+on_interrupt() {
+    warn "Setup interrupted. Rollback state was preserved in $STATE_DIR."
+    exit 130
+}
+trap on_interrupt INT TERM
 
 log "Applying NetworkManager-native MAC privacy..."
 configure_mac_profiles
